@@ -1,0 +1,1 @@
+function a(o){const n=Number(o);if(o===""||o===null||o===void 0||Number.isNaN(n))return{color:"#94a3b8",ratio:0};const r=n>10?12:10,t=n/r;return{color:t>=.8?"#059669":t>=.5?"#d97706":"#dc2626",ratio:t}}export{a as s};

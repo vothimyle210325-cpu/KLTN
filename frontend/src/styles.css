@@ -1,0 +1,126 @@
+/* Global styles */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Be Vietnam Pro", "Segoe UI", "Tahoma", system-ui, sans-serif;
+  background: #f0f4f8;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+/* Text selection */
+::selection {
+  background-color: rgba(30, 64, 175, 0.15);
+  color: #1e3a8a;
+}
+
+/* Focus visible outline */
+*:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Smooth transitions for interactive elements */
+a,
+button {
+  transition: all 0.15s ease;
+}
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent layout shift on images */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Data grid overlay fix */
+.MuiDataGrid-overlayWrapper {
+  z-index: 1;
+}
+
+/* Ensure card transitions work smoothly */
+.MuiCard-root {
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease !important;
+}
+
+/* Button ripple color override */
+.MuiButtonBase-root {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Print styles */
+@media print {
+  .MuiAppBar-root {
+    display: none !important;
+  }
+
+  .MuiDrawer-root {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+  }
+}
+
+/* Responsive font sizing */
+@media (max-width: 600px) {
+  body {
+    font-size: 14px;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
