@@ -2,8 +2,8 @@
 // https://docs.google.com/spreadsheets/d/<DAY_LA_SPREADSHEET_ID>/edit
 // Dien ID vao duoi, luu Code.gs, Deploy lai Web App neu can.
 const CONFIG = {
-  SPREADSHEET_ID: "REPLACE_WITH_YOUR_SPREADSHEET_ID",
-  SOURCE_DATA_SPREADSHEET_ID: "1Klg63cEIEyCTo2zkPff6hyoR8jXV19nxBRX56qyy_tw",
+  SPREADSHEET_ID: "1k4W3AZDsKlu0h5XIx9-70tfd2-l0FGgxE7zxfKanLGY",
+  SOURCE_DATA_SPREADSHEET_ID: "1k4W3AZDsKlu0h5XIx9-70tfd2-l0FGgxE7zxfKanLGY",
   ADMIN_REGISTER_KEY: "KLTN_ADMIN_2026",
   SHEETS: {
     USERS: ["email", "password", "name", "role", "major", "trainingSystem", "phone", "mssv", "status", "createdAt"],
@@ -14,7 +14,7 @@ const CONFIG = {
     SUBMISSIONS: ["student", "type", "file", "turnitin", "score", "submittedAt", "gvhdApproval", "gvhdApprovalDate"],
     INTERNSHIP_FORMS: ["student", "file", "submittedAt", "status"],
     COUNCILS: ["student", "gvhd", "gvpb", "chairman", "secretary", "date", "location", "councilStatus", "finalScore", "minutesUrl"],
-    // SCORES: thêm các cột r1–r8 + rubricTotal để lưu từng tiêu chí chấm điểm (KLTN, BCTT, ...)
+    // SCORES: rubric o r1–r8 + rubricTotal + cot score; cot comment chi nhan xet chu (khong JSON)
     SCORES: ["id", "student", "type", "role", "score", "comment", "savedAt", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "rubricTotal"],
     REVISIONS: ["id", "student", "kltnFile", "revisionNote", "submittedAt", "gvhdApproval", "gvhdApprovalDate", "chairmanApproval", "chairmanApprovalDate", "finalStatus"],
     TOPIC_SUGGESTIONS: ["id", "lecturer", "name", "field", "description", "status", "createdAt"],
@@ -63,6 +63,7 @@ function doPost(e) {
     if (action === "register") return json(registerUser(body));
     if (action === "getStudentDashboard") return json(getStudentDashboard(body));
     if (action === "createRegistration") return json(createRegistration(body));
+    if (action === "updateStudentRegistration") return json(updateStudentRegistration(body));
     if (action === "saveSubmission") return json(saveSubmission(body));
     if (action === "getGuidanceList") return json(getLecturerList(body, "guidance"));
     if (action === "getReviewList") return json(getLecturerList(body, "review"));
@@ -107,6 +108,8 @@ function doPost(e) {
     if (action === "getCouncilMinutes") return json(getCouncilMinutes(body));
     if (action === "getRevisionApprovals") return json(getRevisionApprovals(body));
     if (action === "ensureSheetStructure") return json(ensureSheetStructure(body));
+    if (action === "repairScoresComments") return json(repairScoresCommentsInSheet(body));
+    if (action === "repairScoresSync") return json(repairScoresSyncScoreColumn(body));
 
     return json({ ok: false, message: "Unknown action: " + action });
   } catch (err) {
@@ -289,15 +292,15 @@ function seedSampleData() {
   ];
 
   const scores = [
-    // KLTN (thang 0-12) - lưu rubric vào comment JSON + r1..r8 + rubricTotal
-    ["sc-01", "sv02@univ.edu.vn", "KLTN", "GVHD", 8.5, '{"v":1,"rubric":[0.75,0.75,1.25,1.25,2.0,0.75,0.75,1.0],"total":8.5,"note":"KLTN GVHD: bai lam tot, co yeu to sang tao; can hoan thien phan thuc nghiem."}', now, 0.75, 0.75, 1.25, 1.25, 2.0, 0.75, 0.75, 1.0, 8.5],
-    ["sc-02", "sv02@univ.edu.vn", "KLTN", "GVPB", 8.0, '{"v":1,"rubric":[0.75,0.75,1.0,1.25,1.5,0.75,0.75,1.25],"total":8.0,"note":"KLTN GVPB: phan tich kha toan dien; co cau hoi ve scale va do chinh xac mo hinh."}', now, 0.75, 0.75, 1.0, 1.25, 1.5, 0.75, 0.75, 1.25, 8.0],
-    ["sc-03", "sv02@univ.edu.vn", "KLTN", "CHUTICH", 8.5, '{"v":1,"rubric":[0.75,0.75,1.25,1.5,1.75,0.75,0.75,1.0],"total":8.5,"note":"KLTN Chu tich: trinh bay tot; tra loi duoc cau hoi phan bien."}', now, 0.75, 0.75, 1.25, 1.5, 1.75, 0.75, 0.75, 1.0, 8.5],
+    // KLTN (0–12): rubric o r1..r8 + rubricTotal; cot comment chi nhan xet chu
+    ["sc-01", "sv02@univ.edu.vn", "KLTN", "GVHD", 8.5, "KLTN GVHD: bai lam tot, co yeu to sang tao; can hoan thien phan thuc nghiem.", now, 0.75, 0.75, 1.25, 1.25, 2.0, 0.75, 0.75, 1.0, 8.5],
+    ["sc-02", "sv02@univ.edu.vn", "KLTN", "GVPB", 8.0, "KLTN GVPB: phan tich kha toan dien; co cau hoi ve scale va do chinh xac mo hinh.", now, 0.75, 0.75, 1.0, 1.25, 1.5, 0.75, 0.75, 1.25, 8.0],
+    ["sc-03", "sv02@univ.edu.vn", "KLTN", "CHUTICH", 8.5, "KLTN Chu tich: trinh bay tot; tra loi duoc cau hoi phan bien.", now, 0.75, 0.75, 1.25, 1.5, 1.75, 0.75, 0.75, 1.0, 8.5],
 
-    // BCTT (thang 0-10) - lưu rubric vào comment JSON + r1..r8 + rubricTotal
-    ["sc-04", "sv02@univ.edu.vn", "BCTT", "GVHD", 8.5, '{"v":1,"rubric":[0.75,0.75,1.5,1.25,1.5,0.75,0.5,1.5],"total":8.5,"note":"BCTT GVHD: bai lam tot, gia tri thuc tien; can bo sung tai lieu."}', now, 0.75, 0.75, 1.5, 1.25, 1.5, 0.75, 0.5, 1.5, 8.5],
-    ["sc-05", "sv02@univ.edu.vn", "BCTT", "GVPB", 9.0, '{"v":1,"rubric":[0.75,0.75,1.75,1.25,1.5,0.75,0.75,1.5],"total":9.0,"note":"BCTT GVPB: phan tich sau sac; phuong phap khoa hoc; ket qua dang tin cay."}', now, 0.75, 0.75, 1.75, 1.25, 1.5, 0.75, 0.75, 1.5, 9.0],
-    ["sc-06", "sv02@univ.edu.vn", "BCTT", "CHUTICH", 8.0, '{"v":1,"rubric":[0.75,0.5,1.25,1.25,1.5,0.75,0.75,1.25],"total":8.0,"note":"BCTT Chu tich: dap ung yeu cau; co diem tot ve noi dung va tra loi cau hoi."}', now, 0.75, 0.5, 1.25, 1.25, 1.5, 0.75, 0.75, 1.25, 8.0]
+    // BCTT (0–10): rubric o r1..r8 + rubricTotal; cot comment chi nhan xet chu
+    ["sc-04", "sv02@univ.edu.vn", "BCTT", "GVHD", 8.5, "BCTT GVHD: bai lam tot, gia tri thuc tien; can bo sung tai lieu.", now, 0.75, 0.75, 1.5, 1.25, 1.5, 0.75, 0.5, 1.5, 8.5],
+    ["sc-05", "sv02@univ.edu.vn", "BCTT", "GVPB", 9.0, "BCTT GVPB: phan tich sau sac; phuong phap khoa hoc; ket qua dang tin cay.", now, 0.75, 0.75, 1.75, 1.25, 1.5, 0.75, 0.75, 1.5, 9.0],
+    ["sc-06", "sv02@univ.edu.vn", "BCTT", "CHUTICH", 8.0, "BCTT Chu tich: dap ung yeu cau; co diem tot ve noi dung va tra loi cau hoi.", now, 0.75, 0.5, 1.25, 1.25, 1.5, 0.75, 0.75, 1.25, 8.0]
   ];
 
   const revisions = [
@@ -442,34 +445,68 @@ function registerUser(payload) {
 
 function getStudentDashboard(payload) {
   var email = payload.email;
-  var student = readObjects("STUDENTS").find(function (s) { return String(s.email || "").toLowerCase() === String(email || "").toLowerCase(); }) || { status: "NEW" };
+  var users = readObjects("USERS");
+  var students = readObjects("STUDENTS");
+  var student = students.find(function (s) { return String(s.email || "").toLowerCase() === String(email || "").toLowerCase(); }) || null;
+  var userInfo = users.find(function (u) { return String(u.email || "").toLowerCase() === String(email || "").toLowerCase(); }) || null;
+
+  if (!userInfo) {
+    return { ok: false, message: "Email '" + email + "' khong ton tai trong sheet USERS. Vui long kiem tra hoac yeu cau admin tao tai khoan." };
+  }
+  if (userInfo.role && userInfo.role.toUpperCase() !== "SV") {
+    return { ok: false, message: "Tai khoan '" + email + "' khong phai sinh vien (role = " + userInfo.role + "). Chi sinh vien (SV) moi duoc truy cap trang nay." };
+  }
+  if (!student) {
+    return { ok: false, message: "Sinh vien '" + email + "' chua co trong sheet STUDENTS. Vui long lien he TBM de them vao danh sach sinh vien." };
+  }
+  if (student.status && student.status.toUpperCase() !== "APPROVED" && student.status !== "PENDING" && student.status !== "NEW") {
+    // status khac PENDING/APPROVED/NEW -> tai khoan chua duyet, chi hien thong tin co ban
+  }
+
+  var studentObj = student || { status: "NEW" };
+  if (userInfo.name && !studentObj.name) studentObj.name = userInfo.name;
+  if (userInfo.mssv && !studentObj.mssv) studentObj.mssv = userInfo.mssv;
+  if (userInfo.major && !studentObj.major) studentObj.major = userInfo.major;
+  if (userInfo.trainingSystem && !studentObj.trainingSystem) studentObj.trainingSystem = userInfo.trainingSystem;
+
   var regs = readObjects("REGISTRATIONS").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
   var subs = readObjects("SUBMISSIONS").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
   var councils = readObjects("COUNCILS").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
   var revisions = readObjects("REVISIONS").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
-  var scores = readObjects("SCORES").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
+  var scoresRaw = readObjects("SCORES").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
+  var scores = dedupeEnrichedScoresByTypeRole(scoresRaw.map(enrichScoreRow));
   var periods = readObjects("PERIODS").filter(function (x) { return x.status === "ACTIVE"; });
   var suggestions = readObjects("TOPIC_SUGGESTIONS").filter(function (x) { return x.status === "APPROVED"; });
-
-  var lecturers = readObjects("LECTURERS").map(function (l) {
-    var info = readObjects("USERS").find(function (u) { return u.email === l.email; }) || {};
-    return { email: l.email, name: info.name || l.email, majors: l.majors || "", quota: l.quota, currentSlot: l.currentSlot, expertise: l.expertise };
+  var topics = readObjects("TOPICS");
+  regs.forEach(function (r) {
+    var t = topics.find(function (x) { return String(x.id || "").toLowerCase() === String(r.topic || "").toLowerCase(); });
+    r.topicField = t ? (t.field || "") : "";
   });
 
-  var fields = [];
-  var existingFields = readObjects("TOPICS").map(function (t) { return t.field; });
-  if (existingFields.length === 0) fields = ["CNTT", "HTTT", "AI", "Data", "Security", "Cloud"];
-  else fields = existingFields.filter(unique);
+  // Lấy danh sách GV, loại bỏ trùng lặp (cùng email chỉ giữ 1 bản ghi đầu tiên)
+  var lecturersAll = readObjects("LECTURERS");
+  var seenEmails = {};
+  var lecturers = [];
+  lecturersAll.forEach(function (l) {
+    var key = String(l.email || "").toLowerCase();
+    if (key && !seenEmails[key]) {
+      seenEmails[key] = true;
+      var info = users.find(function (u) { return String(u.email || "").toLowerCase() === key; }) || {};
+      lecturers.push({ email: l.email, name: info.name || l.email || key, majors: l.majors || "", quota: l.quota, currentSlot: l.currentSlot, expertise: l.expertise });
+    }
+  });
+
+  var fields = collectRegistrationFields();
 
   return {
     ok: true,
     data: {
-      student: student,
+      student: studentObj,
       registrations: regs,
       submissions: subs,
       councils: councils,
       revisions: revisions,
-      scores: scores,
+      scores: scores.map(enrichScoreRow),
       lecturers: lecturers,
       fields: fields,
       periods: periods,
@@ -487,8 +524,8 @@ function createRegistration(payload) {
   var student = students.find(function (s) { return String(s.email || "").toLowerCase() === String(studentEmail || "").toLowerCase(); });
   if (!student) return { ok: false, message: "Sinh vien khong ton tai" };
 
-  if (regType === "KLTN" && student.status !== "BCTT_APPROVED" && student.status !== "KLTN_REGISTERED") {
-    return { ok: false, message: "Phai hoan thanh BCTT moi duoc dang ky KLTN" };
+  if (regType === "KLTN" && student.status !== "BCTT_APPROVED" && student.status !== "BCTT_DONE" && student.status !== "KLTN_REGISTERED") {
+    return { ok: false, message: "Phai hoan thanh BCTT (duyet) moi duoc dang ky KLTN" };
   }
 
   var regs = readObjects("REGISTRATIONS");
@@ -516,9 +553,94 @@ function createRegistration(payload) {
 
   var newStatus = regType === "BCTT" ? "BCTT_REGISTERED" : "KLTN_REGISTERED";
   updateStudentStatus(studentEmail, newStatus);
+  // Đồng bộ GVHD lên sheet STUDENTS (bcttLecturer / kltnLecturer) — trước đây chỉ cập nhật status nên các cột FK trống.
+  if (regType === "BCTT") {
+    patchStudentRowByEmail(studentEmail, { bcttLecturer: lecturerEmail });
+  } else if (regType === "KLTN") {
+    patchStudentRowByEmail(studentEmail, { kltnLecturer: lecturerEmail });
+  }
 
   writeAuditLog("SV", studentEmail, "CREATE_REGISTRATION", id, regType + " - " + topicName + " - GV:" + lecturerEmail);
   return { ok: true, data: { id: id, status: newStatus } };
+}
+
+function updateTopicField(topicId, field) {
+  if (!topicId) return;
+  var hc = getHeaderColumnMap("TOPICS");
+  if (!hc) return;
+  var idIdx = hc.map["id"];
+  var fieldIdx = hc.map["field"];
+  if (idIdx === undefined || fieldIdx === undefined) return;
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    if (String(hc.values[i][idIdx]) === String(topicId)) {
+      hc.sheet.getRange(i + 1, fieldIdx + 1).setValue(field || "");
+      return;
+    }
+  }
+}
+
+/** SV chỉnh đợt / lĩnh vực / tên đề tài khi đăng ký còn PENDING. */
+function updateStudentRegistration(payload) {
+  var studentEmail = String(payload.student || "").trim().toLowerCase();
+  var regType = payload.type || "BCTT";
+  var newDot = payload.dot;
+  var newField = payload.field;
+  var newTopicName = payload.topic;
+
+  var hc = getHeaderColumnMap("REGISTRATIONS");
+  if (!hc) return { ok: false, message: "Khong doc duoc REGISTRATIONS" };
+  var idIdx = hc.map["id"];
+  var studentIdx = hc.map["student"];
+  var typeIdx = hc.map["type"];
+  var statusIdx = hc.map["status"];
+  var dotIdx = hc.map["dot"];
+  var topicNameIdx = hc.map["topicname"];
+  var topicColIdx = hc.map["topic"];
+
+  if (idIdx === undefined || studentIdx === undefined || typeIdx === undefined || statusIdx === undefined) {
+    return { ok: false, message: "Sheet REGISTRATIONS thieu cot bat buoc" };
+  }
+
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    var st = String(hc.values[i][studentIdx] || "").toLowerCase();
+    var ty = hc.values[i][typeIdx];
+    if (st !== studentEmail || ty !== regType) continue;
+    if (String(hc.values[i][statusIdx] || "").toUpperCase() !== "PENDING") {
+      return { ok: false, message: "Chi cap nhat khi dang ky dang cho duyet (PENDING)" };
+    }
+
+    var rowNum = i + 1;
+    if (newDot !== undefined && dotIdx !== undefined) {
+      hc.sheet.getRange(rowNum, dotIdx + 1).setValue(newDot);
+    }
+    if (newTopicName !== undefined && topicNameIdx !== undefined) {
+      hc.sheet.getRange(rowNum, topicNameIdx + 1).setValue(newTopicName);
+    }
+
+    var topicId = topicColIdx !== undefined ? hc.values[i][topicColIdx] : "";
+    if (newField !== undefined && topicId) {
+      updateTopicField(String(topicId), newField);
+    }
+
+    writeAuditLog("SV", studentEmail, "UPDATE_STUDENT_REGISTRATION", regType, String(newDot || "") + " | field:" + String(newField || ""));
+    return { ok: true, message: "Cap nhat dang ky thanh cong" };
+  }
+  return { ok: false, message: "Khong tim thay dang ky PENDING cho loai " + regType };
+}
+
+/** SV được nộp bài KLTN chỉnh sửa khi đã bảo vệ: STUDENTS.status = DEFENDED hoặc COUNCILS.councilStatus = DEFENDED */
+function studentMaySubmitKltnRevision(studentEmail) {
+  var want = String(studentEmail || "").trim().toLowerCase();
+  if (!want) return false;
+  var students = readObjects("STUDENTS");
+  var st = students.find(function (s) { return String(s.email || "").toLowerCase() === want; });
+  if (st && String(st.status || "").toUpperCase() === "DEFENDED") return true;
+  var councils = readObjects("COUNCILS");
+  for (var j = 0; j < councils.length; j++) {
+    if (String(councils[j].student || "").toLowerCase() !== want) continue;
+    if (String(councils[j].councilStatus || "").toUpperCase() === "DEFENDED") return true;
+  }
+  return false;
 }
 
 function saveSubmission(payload) {
@@ -528,6 +650,10 @@ function saveSubmission(payload) {
   var turnitin = payload.turnitin || "";
   var score = payload.score || "";
   var now = new Date().toISOString();
+
+  if (String(subType || "").toUpperCase() === "KLTN_REVISION" && !studentMaySubmitKltnRevision(studentEmail)) {
+    return { ok: false, message: "Chi duoc nop bai chinh sua sau khi hoi dong da bao ve (DEFENDED tren COUNCILS hoac STUDENTS)." };
+  }
 
   var subs = readObjects("SUBMISSIONS");
   var exists = subs.find(function (s) {
@@ -541,6 +667,10 @@ function saveSubmission(payload) {
   }
 
   writeAuditLog(payload.role || "SV", studentEmail, "SAVE_SUBMISSION", subType, fileUrl || "URL updated");
+  // Phiếu xác nhận thực tập: sinh viên nộp qua SUBMISSIONS type PHIEU_TT → ghi link vào STUDENTS.internshipForm.
+  if (fileUrl && subType === "PHIEU_TT") {
+    patchStudentRowByEmail(studentEmail, { internshipForm: fileUrl });
+  }
   return { ok: true, message: "Luu nop bai thanh cong" };
 }
 
@@ -559,11 +689,14 @@ function saveInternshipForm(payload) {
   }
 
   writeAuditLog("SV", studentEmail, "SAVE_INTERNSHIP_FORM", studentEmail, fileUrl);
+  if (fileUrl) {
+    patchStudentRowByEmail(studentEmail, { internshipForm: fileUrl });
+  }
   return { ok: true, message: "Luu phieu xac nhan thuc tap thanh cong" };
 }
 
-/** Khớp frontend KLTN_RUBRIC_CRITERIA — tổng tối đa 12 */
-var KLTN_RUBRIC_MAXS = [1, 1, 2, 2, 2, 1, 1, 2];
+/** Khớp frontend KLTN_RUBRIC_CRITERIA — tổng tối đa 10 */
+var KLTN_RUBRIC_MAXS = [1, 1, 1, 2, 2, 1, 1, 1];
 
 // BCTT: dùng cùng 8 tiêu chí với KLTN, nhưng tổng max = 10.
 // Tương ứng scale (10/12) và làm tròn theo bước 0.25 để tổng đúng 10:
@@ -571,17 +704,278 @@ var KLTN_RUBRIC_MAXS = [1, 1, 2, 2, 2, 1, 1, 2];
 var BCTT_RUBRIC_MAX_TOTAL = 10;
 var BCTT_RUBRIC_MAXS = [0.75, 0.75, 1.75, 1.75, 1.75, 0.75, 0.75, 1.75];
 
+/** Tách JSON chấm điểm (v/rubric/total/note) khỏi nhận xét hiển thị — khớp cột comment trên Google Sheet. */
 function parseCommentForRubric(comment) {
   if (!comment || typeof comment !== "string") return { note: "", rubric: null, total: null };
   var s = String(comment).trim();
-  if (s.charAt(0) !== "{") return { note: comment, rubric: null, total: null };
+  if (!s) return { note: "", rubric: null, total: null };
+  if (s.charAt(0) !== "{") return { note: s, rubric: null, total: null };
   try {
     var o = JSON.parse(s);
-    if (o && o.v === 1 && o.rubric) {
-      return { note: o.note || "", rubric: o.rubric, total: o.total };
+    if (!o || typeof o !== "object") return { note: "", rubric: null, total: null };
+    var note = o.note != null ? String(o.note) : "";
+    var total = o.total != null && o.total !== "" && !isNaN(Number(o.total)) ? Number(o.total) : null;
+    var rubric = Array.isArray(o.rubric) && o.rubric.length > 0 ? o.rubric : null;
+    if (rubric || total != null) {
+      return { note: note, rubric: rubric, total: total };
+    }
+    if (note) {
+      return { note: note, rubric: null, total: null };
     }
   } catch (e) {}
-  return { note: comment, rubric: null, total: null };
+  return { note: "", rubric: null, total: null };
+}
+
+function rubricFromScoreColumns(s) {
+  var arr = [];
+  for (var i = 1; i <= 8; i++) {
+    var k = "r" + i;
+    if (s[k] === undefined || s[k] === null || s[k] === "") return null;
+    var n = Number(s[k]);
+    if (isNaN(n)) return null;
+    arr.push(n);
+  }
+  return arr.length === 8 ? arr : null;
+}
+
+function sumRubricArray(arr) {
+  var t = 0;
+  for (var i = 0; i < (arr || []).length; i++) t += Number(arr[i]) || 0;
+  return t;
+}
+
+/** Đọc rubricTotal từ dòng SCORES (một số template đặt tên cột khác). */
+function rubricTotalFromRow(s) {
+  if (!s) return null;
+  var candidates = ["rubricTotal", "rubrictotal", "rubric_total"];
+  for (var i = 0; i < candidates.length; i++) {
+    var k = candidates[i];
+    if (s[k] !== undefined && s[k] !== null && String(s[k]).trim() !== "" && !isNaN(Number(s[k]))) {
+      return Number(s[k]);
+    }
+  }
+  return null;
+}
+
+/**
+ * Chuẩn hóa một dòng SCORES: comment chỉ còn text note (vd "bài hay").
+ * Điểm hiển thị: rubricTotal (cột) → total trong JSON → tổng mảng rubric (7–8 ô đều được).
+ * Không dùng cột score khi đã xác định là dòng chấm rubric (JSON hoặc đủ cột r*) — tránh hiển thị 16 sai.
+ */
+function enrichScoreRow(s) {
+  var p = parseCommentForRubric(s.comment);
+  var rubricCols = rubricFromScoreColumns(s);
+  var rubricArr = rubricCols || p.rubric;
+  if (rubricArr && rubricArr.length && s.type === "KLTN") {
+    rubricArr = rubricArr.map(function (v, i) {
+      var mx = i < KLTN_RUBRIC_MAXS.length ? KLTN_RUBRIC_MAXS[i] : 999;
+      var n = Number(v);
+      if (isNaN(n) || n < 0) return 0;
+      return Math.min(n, mx);
+    });
+  }
+
+  var fromRubricTotal = rubricTotalFromRow(s);
+  var fromJsonTotal = p.total != null && !isNaN(Number(p.total)) ? Number(p.total) : null;
+  var fromSum = rubricArr && rubricArr.length > 0 ? sumRubricArray(rubricArr) : null;
+
+  var structuredRubricRow =
+    (p.rubric && p.rubric.length > 0) ||
+    p.total != null ||
+    rubricCols != null ||
+    (fromRubricTotal != null);
+
+  var colRaw = s.score;
+  var colNum = (colRaw !== undefined && colRaw !== null && String(colRaw).trim() !== "" && !isNaN(Number(colRaw))) ? Number(colRaw) : null;
+
+  var scoreStr = "";
+  if (structuredRubricRow) {
+    if (fromRubricTotal != null) scoreStr = String(Number(fromRubricTotal.toFixed(2)));
+    else if (fromJsonTotal != null) scoreStr = String(Number(fromJsonTotal.toFixed(2)));
+    else if (fromSum != null) scoreStr = String(Number(fromSum.toFixed(2)));
+    else if (colNum != null) scoreStr = String(Number(colNum.toFixed(2)));
+  } else {
+    if (colNum != null) scoreStr = String(Number(colNum.toFixed(2)));
+    else if (fromRubricTotal != null) scoreStr = String(Number(fromRubricTotal.toFixed(2)));
+    else if (fromJsonTotal != null) scoreStr = String(Number(fromJsonTotal.toFixed(2)));
+    else scoreStr = "";
+  }
+
+  var displayComment = "";
+  if (structuredRubricRow) {
+    displayComment = p.note != null ? p.note : "";
+  } else {
+    var raw = String(s.comment || "").trim();
+    if (raw.charAt(0) === "{") displayComment = p.note || "";
+    else displayComment = raw;
+  }
+
+  var out = {};
+  for (var key in s) {
+    if (Object.prototype.hasOwnProperty.call(s, key)) out[key] = s[key];
+  }
+  out.score = scoreStr;
+  out.comment = displayComment;
+  out.rubric = rubricArr && rubricArr.length > 0 ? rubricArr : null;
+  out.role = normalizeScoreRoleKey(s.role || "");
+  return out;
+}
+
+/** Chuẩn hóa role trong SCORES để khớp GVHD / GVPB / CHUTICH (tránh lệch tên cột sheet). */
+function normalizeScoreRoleKey(role) {
+  var r = String(role || "").trim().toUpperCase().replace(/\s+/g, "").replace(/_/g, "");
+  if (r === "GV" || r === "GVHD") return "GVHD";
+  if (r === "GVPB" || r === "PHANBIEN") return "GVPB";
+  if (r === "CHUTICH" || r === "CHAIRMAN" || r === "CTHD" || r === "CHỦTỊCH") return "CHUTICH";
+  return String(role || "").trim();
+}
+/** Gộp dòng SCORES trùng (cùng type + role): ưu tiên có điểm, sau đó savedAt mới nhất. */
+function dedupeEnrichedScoresByTypeRole(enrichedRows) {
+  var best = {};
+  function hasMeaningfulScore(r) {
+    var sc = r.score;
+    if (sc === undefined || sc === null) return false;
+    if (String(sc).trim() === "") return false;
+    return !isNaN(Number(sc));
+  }
+  for (var i = 0; i < enrichedRows.length; i++) {
+    var row = enrichedRows[i];
+    var roleK = normalizeScoreRoleKey(row.role);
+    var k = String(row.type || "") + "|" + roleK;
+    var prev = best[k];
+    if (!prev) {
+      best[k] = row;
+      continue;
+    }
+    var t1 = new Date(row.savedAt || 0).getTime();
+    var t0 = new Date(prev.savedAt || 0).getTime();
+    if (hasMeaningfulScore(row) && !hasMeaningfulScore(prev)) best[k] = row;
+    else if (!hasMeaningfulScore(row) && hasMeaningfulScore(prev)) continue;
+    else if (t1 >= t0) best[k] = row;
+  }
+  var out = [];
+  for (var key in best) {
+    if (Object.prototype.hasOwnProperty.call(best, key)) out.push(best[key]);
+  }
+  return out;
+}
+/**
+ * Ghép điểm TB: không để sheet lưu "0" (hoặc rỗng có nhầm) che mất TB tính từ SCORES.
+ * Ưu tiên finalScore sheet khi là số > 0; không thì dùng trung bình các dòng KLTN đã chấm.
+ */
+function mergeCouncilFinalScore(sheetFinal, computedAvgStr, hasComputed) {
+  var raw = sheetFinal;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== "" && !isNaN(Number(raw))) {
+    var n = Number(raw);
+    if (n > 0) return String(n.toFixed(2));
+  }
+  if (hasComputed && computedAvgStr) return computedAvgStr;
+  return "";
+}
+
+/**
+ * Mot lan: thay comment JSON cu trong sheet SCORES bang chi phan note + chinh cot score theo rubricTotal/tong.
+ * Goi API: action "repairScoresComments", role ADMIN hoac TBM.
+ */
+function repairScoresCommentsInSheet(payload) {
+  var role = String((payload && payload.role) || "").toUpperCase();
+  if (role !== "ADMIN" && role !== "TBM") {
+    return { ok: false, message: "Chi ADMIN/TBM duoc chay repairScoresComments" };
+  }
+  var rows = readObjects("SCORES");
+  var fixed = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var s = rows[i];
+    var c = String(s.comment || "").trim();
+    if (!c || c.charAt(0) !== "{") continue;
+    var isLegacyRubricJson = false;
+    try {
+      var jo = JSON.parse(c);
+      if (jo && typeof jo === "object") {
+        if (Array.isArray(jo.rubric) && jo.rubric.length > 0) isLegacyRubricJson = true;
+        else if (jo.total != null && jo.total !== "" && !isNaN(Number(jo.total))) isLegacyRubricJson = true;
+      }
+    } catch (e2) {}
+    if (!isLegacyRubricJson) continue;
+    var e = enrichScoreRow(s);
+    if (!s.id) continue;
+    updateScoreRow(
+      s.id,
+      s.student,
+      s.type,
+      s.role,
+      e.score,
+      e.comment,
+      s.savedAt || new Date().toISOString(),
+      null,
+      null
+    );
+    fixed++;
+  }
+  writeAuditLog(role, (payload && payload.by) || role, "REPAIR_SCORES_COMMENTS", String(fixed), "Normalized comment + score");
+  return { ok: true, message: "Da chuan hoa " + fixed + " dong SCORES (comment = note, score dong bo)", data: { fixed: fixed } };
+}
+/**
+ * Đồng bộ cột score trên sheet = điểm suy ra từ rubricTotal / r1–r8 / JSON (sau lỗi updateScoreRow cũ ghi nhầm 2–16).
+ * Goi API: action "repairScoresSync", role ADMIN hoac TBM.
+ */
+function repairScoresSyncScoreColumn(payload) {
+  var role = String((payload && payload.role) || "").toUpperCase();
+  if (role !== "ADMIN" && role !== "TBM") {
+    return { ok: false, message: "Chi ADMIN/TBM duoc chay repairScoresSync" };
+  }
+  var rows = readObjects("SCORES");
+  var fixed = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var s = rows[i];
+    if (!s.id) continue;
+    var e = enrichScoreRow(s);
+    var want = e.score != null ? String(e.score).trim() : "";
+    var have = s.score != null ? String(s.score).trim() : "";
+    if (!want) continue;
+    if (want === have) continue;
+    updateScoreRow(
+      s.id,
+      s.student,
+      s.type,
+      s.role,
+      want,
+      undefined,
+      s.savedAt || new Date().toISOString(),
+      null,
+      null
+    );
+    fixed++;
+  }
+  writeAuditLog(role, (payload && payload.by) || role, "REPAIR_SCORE_SYNC", String(fixed), "Score = enrich/rubricTotal");
+  return { ok: true, message: "Da dong bo " + fixed + " cot score (bang rubricTotal/tong tieu chi)", data: { fixed: fixed } };
+}
+/** Lĩnh vực / chuyên ngành: mặc định theo template KLTN + từ TOPICS, USERS.major, LECTURERS.majors */
+function collectRegistrationFields() {
+  var defaults = ["CNTT", "HTTT", "AT", "KTMT", "KHMT", "TKPM", "QLCN", "KDQT", "Ktoan", "TMĐT", "TMDT", "Log", "Mạng Máy Tính", "Công Nghệ Thông Tin"];
+  var bucket = {};
+  function addToken(tok) {
+    var t = String(tok || "").trim();
+    if (!t) return;
+    bucket[t.toLowerCase()] = t;
+  }
+  function splitAndAdd(s) {
+    if (!s) return;
+    String(s).split(/[,;/|]/).forEach(function (x) { addToken(x); });
+  }
+  defaults.forEach(addToken);
+  readObjects("TOPICS").forEach(function (t) { addToken(t.field); });
+  readObjects("USERS").forEach(function (u) {
+    splitAndAdd(u.major);
+  });
+  readObjects("LECTURERS").forEach(function (l) {
+    splitAndAdd(l.majors);
+    splitAndAdd(l.expertise);
+  });
+  var list = [];
+  for (var k in bucket) list.push(bucket[k]);
+  list.sort(function (a, b) { return String(a).localeCompare(String(b), "vi", { sensitivity: "base" }); });
+  return list;
 }
 
 function saveScore(payload) {
@@ -589,7 +983,9 @@ function saveScore(payload) {
   var scoreType = payload.type || "KLTN";
   var scorerRole = payload.scorerRole || payload.role || "GV";
   var scoreVal = payload.score;
-  var comment = payload.comment || "";
+  // Cot comment tren Google Sheet chi luu nhan xet chu (vd "rat hay"). Rubric luu o r1–r8 + rubricTotal + cot score.
+  var notePlain = payload.comment != null ? String(payload.comment) : "";
+  var comment = notePlain;
 
   // Nếu có rubric (KLTN hoặc BCTT...), tính tổng và lưu từng tiêu chí vào cột riêng (r1–r8, rubricTotal)
   var rubricArr = null;
@@ -612,8 +1008,8 @@ function saveScore(payload) {
       rubricTotal += rv;
     }
     scoreVal = String(rubricTotal.toFixed(2));
-    rubricTotal = Number(scoreVal); // sync rounding with 'score' column + comment.total
-    comment = JSON.stringify({ v: 1, rubric: rubricArr, total: rubricTotal, note: payload.comment || "" });
+    rubricTotal = Number(scoreVal); // dong bo cot score voi tong rubric
+    comment = notePlain;
   }
 
   var now = new Date().toISOString();
@@ -641,8 +1037,9 @@ function saveScore(payload) {
   if (allScores.length > 0) {
     var total = 0, count = 0;
     allScores.forEach(function (s) {
-      if (s.score !== undefined && s.score !== null && s.score !== "" && !isNaN(Number(s.score))) {
-        total += Number(s.score);
+      var e = enrichScoreRow(s);
+      if (e.score !== undefined && e.score !== null && e.score !== "" && !isNaN(Number(e.score))) {
+        total += Number(e.score);
         count++;
       }
     });
@@ -690,13 +1087,13 @@ function getAllScores(payload) {
 
   var result = { GVHD: null, GVPB: null, CHUTICH: null, THANHVIEN: null };
   scores.forEach(function (s) {
-    var key = s.role || "THANHVIEN";
-    var p = parseCommentForRubric(s.comment);
-    var disp = p.rubric ? (p.note || "") : s.comment;
+    var key = normalizeScoreRoleKey(s.role || "THANHVIEN");
+    if (!key) key = "THANHVIEN";
+    var e = enrichScoreRow(s);
     result[key] = {
-      score: s.score,
-      comment: disp,
-      rubric: p.rubric,
+      score: e.score,
+      comment: e.comment,
+      rubric: e.rubric,
       savedAt: s.savedAt
     };
   });
@@ -719,6 +1116,7 @@ function getLecturerList(payload, mode) {
   var users = readObjects("USERS");
   var topics = readObjects("TOPICS");
   var scores = readObjects("SCORES");
+  var scorerRole = payload.scorerRole ? String(payload.scorerRole).trim() : "";
 
   var filtered = [];
   if (mode === "guidance") {
@@ -728,7 +1126,9 @@ function getLecturerList(payload, mode) {
       return String(c.gvpb || "").toLowerCase() === String(email || "").toLowerCase();
     });
     var studentEmails = councils.map(function (c) { return c.student; });
-    filtered = regs.filter(function (r) { return studentEmails.indexOf(r.student) !== -1; });
+    filtered = regs.filter(function (r) {
+      return studentEmails.indexOf(r.student) !== -1 && String(r.type || "").toUpperCase() === "KLTN";
+    });
   } else if (mode === "council") {
     var allCouncils = readObjects("COUNCILS").filter(function (c) {
       return String(c.chairman || "").toLowerCase() === String(email || "").toLowerCase() ||
@@ -736,7 +1136,10 @@ function getLecturerList(payload, mode) {
              String(c.secretary || "").toLowerCase() === String(email || "").toLowerCase();
     });
     var councilStudents = allCouncils.map(function (c) { return c.student; });
-    filtered = regs.filter(function (r) { return councilStudents.indexOf(r.student) !== -1; });
+    // Hội đồng / chủ tịch / thư ký chỉ chấm KLTN; BCTT do GVHD ở tab Hướng dẫn.
+    filtered = regs.filter(function (r) {
+      return councilStudents.indexOf(r.student) !== -1 && String(r.type || "").toUpperCase() === "KLTN";
+    });
   }
 
   var merged = filtered.map(function (r) {
@@ -745,12 +1148,19 @@ function getLecturerList(payload, mode) {
     var stScores = scores.filter(function (s) { return String(s.student || "").toLowerCase() === String(r.student || "").toLowerCase() && s.type === r.type; });
     var myScore = null;
     stScores.forEach(function (s) {
-      if (s.role === payload.role || (payload.role === "GV" && s.role === "GVHD")) {
-        var pr = parseCommentForRubric(s.comment);
+      var rowRole = normalizeScoreRoleKey(s.role);
+      var match = false;
+      if (scorerRole) {
+        match = rowRole === normalizeScoreRoleKey(scorerRole);
+      } else {
+        match = rowRole === normalizeScoreRoleKey(payload.role);
+      }
+      if (match) {
+        var e = enrichScoreRow(s);
         myScore = {
-          score: s.score,
-          comment: pr.rubric ? (pr.note || "") : s.comment,
-          rubric: pr.rubric
+          score: e.score,
+          comment: e.comment,
+          rubric: e.rubric
         };
       }
     });
@@ -782,11 +1192,48 @@ function getLecturerList(payload, mode) {
   return { ok: true, data: merged };
 }
 
+function majorTokensFromString(str) {
+  return String(str || "")
+    .split(/[,;/|]/)
+    .map(function (t) { return t.trim().toLowerCase(); })
+    .filter(function (t) { return t.length > 0; });
+}
+
+/** Khớp chuyên ngành TBM (USERS.major) với LECTURERS.majors (có thể nhiều token cách nhau bởi , ; / |) */
+function lecturerBelongsToTbmMajor(lecturerMajors, tbmMajor) {
+  var want = String(tbmMajor || "").trim().toLowerCase();
+  if (!want) return true;
+  var tokens = majorTokensFromString(lecturerMajors);
+  if (tokens.length === 0) {
+    var lump = String(lecturerMajors || "").trim().toLowerCase();
+    return lump === want;
+  }
+  for (var i = 0; i < tokens.length; i++) {
+    if (tokens[i] === want) return true;
+  }
+  return false;
+}
+
 function getTBMDashboard(payload) {
+  var users = readObjects("USERS");
+  var requestEmail = String((payload && payload.email) || "").trim().toLowerCase();
+  var actor = requestEmail
+    ? users.find(function (u) { return String(u.email || "").toLowerCase() === requestEmail; }) || null
+    : null;
+  var actorRole = actor ? String(actor.role || "").trim().toUpperCase() : "";
+
   var lecturers = readObjects("LECTURERS").map(function (l) {
-    var info = readObjects("USERS").find(function (u) { return u.email === l.email; }) || {};
+    var key = String(l.email || "").trim().toLowerCase();
+    var info = users.find(function (u) { return String(u.email || "").toLowerCase() === key; }) || {};
     return { email: l.email, name: info.name || l.email, majors: l.majors, quota: l.quota, currentSlot: l.currentSlot, expertise: l.expertise };
   });
+
+  if (actorRole === "TBM" && actor && String(actor.major || "").trim()) {
+    var scopeMajor = String(actor.major || "").trim();
+    lecturers = lecturers.filter(function (l) {
+      return lecturerBelongsToTbmMajor(l.majors, scopeMajor);
+    });
+  }
 
   var registrations = readObjects("REGISTRATIONS");
   var students = readObjects("STUDENTS");
@@ -794,7 +1241,6 @@ function getTBMDashboard(payload) {
   var councils = readObjects("COUNCILS");
   var revisions = readObjects("REVISIONS");
   var scores = readObjects("SCORES");
-  var users = readObjects("USERS");
 
   registrations.forEach(function (r) {
     var st = students.find(function (s) { return String(s.email || "").toLowerCase() === String(r.student || "").toLowerCase(); }) || {};
@@ -823,6 +1269,8 @@ function getTBMDashboard(payload) {
   var pending = registrations.filter(function (r) { return r.status === "PENDING"; });
   var audits = readObjects("AUDIT_LOGS").slice(-500).reverse();
 
+  var scoresEnriched = scores.map(enrichScoreRow);
+
   return {
     ok: true,
     data: {
@@ -832,7 +1280,7 @@ function getTBMDashboard(payload) {
       submissions: submissions,
       councils: councils,
       revisions: revisions,
-      scores: scores,
+      scores: scoresEnriched,
       pending: pending.length,
       pendingCount: pending.length
     }
@@ -862,13 +1310,20 @@ function getChairmanDashboard(payload) {
     var sub = submissions.find(function (s) { return String(s.student || "").toLowerCase() === String(c.student || "").toLowerCase() && s.type === "KLTN"; });
 
     var scoreBreakdown = {};
-    stScores.forEach(function (s) { scoreBreakdown[s.role] = { score: s.score, comment: s.comment }; });
+    stScores.forEach(function (s) {
+      var rk = normalizeScoreRoleKey(s.role);
+      var e = enrichScoreRow(s);
+      scoreBreakdown[rk] = { score: e.score, comment: e.comment, rubric: e.rubric };
+    });
 
     var finalAvg = 0, cnt = 0;
     stScores.forEach(function (s) {
-      if (s.score && !isNaN(Number(s.score))) { finalAvg += Number(s.score); cnt++; }
+      var e = enrichScoreRow(s);
+      if (e.score && !isNaN(Number(e.score))) { finalAvg += Number(e.score); cnt++; }
     });
-    if (cnt > 0) finalAvg = (finalAvg / cnt).toFixed(2);
+    var finalAvgStr = cnt > 0 ? (finalAvg / cnt).toFixed(2) : "";
+
+    var gvhdSc = scoreBreakdown.GVHD;
 
     return {
       student: c.student,
@@ -877,9 +1332,9 @@ function getChairmanDashboard(payload) {
       date: c.date,
       location: c.location,
       councilStatus: c.councilStatus || "PENDING",
-      finalScore: c.finalScore || finalAvg,
+      finalScore: mergeCouncilFinalScore(c.finalScore, finalAvgStr, cnt > 0),
       minutesUrl: c.minutesUrl || "",
-      gvhdScore: scoreBreakdown.GVHD ? scoreBreakdown.GVHD.score : "",
+      gvhdScore: gvhdSc ? gvhdSc.score : "",
       gvpbScore: scoreBreakdown.GVPB ? scoreBreakdown.GVPB.score : "",
       chairmanScore: scoreBreakdown.CHUTICH ? scoreBreakdown.CHUTICH.score : "",
       revision: rev || null,
@@ -906,13 +1361,18 @@ function getSecretaryDashboard(payload) {
     var sub = submissions.find(function (s) { return String(s.student || "").toLowerCase() === String(c.student || "").toLowerCase() && s.type === "KLTN"; });
 
     var scoreBreakdown = {};
-    stScores.forEach(function (s) { scoreBreakdown[s.role] = { score: s.score, comment: s.comment }; });
+    stScores.forEach(function (s) {
+      var rk = normalizeScoreRoleKey(s.role);
+      var e = enrichScoreRow(s);
+      scoreBreakdown[rk] = { score: e.score, comment: e.comment, rubric: e.rubric };
+    });
 
     var finalAvg = 0, cnt = 0;
     stScores.forEach(function (s) {
-      if (s.score && !isNaN(Number(s.score))) { finalAvg += Number(s.score); cnt++; }
+      var e = enrichScoreRow(s);
+      if (e.score && !isNaN(Number(e.score))) { finalAvg += Number(e.score); cnt++; }
     });
-    if (cnt > 0) finalAvg = (finalAvg / cnt).toFixed(2);
+    var finalAvgStr = cnt > 0 ? (finalAvg / cnt).toFixed(2) : "";
 
     return {
       student: c.student,
@@ -920,7 +1380,7 @@ function getSecretaryDashboard(payload) {
       date: c.date,
       location: c.location,
       councilStatus: c.councilStatus || "PENDING",
-      finalScore: c.finalScore || finalAvg,
+      finalScore: mergeCouncilFinalScore(c.finalScore, finalAvgStr, cnt > 0),
       minutesUrl: c.minutesUrl || "",
       scores: scoreBreakdown,
       submission: sub || {}
@@ -949,12 +1409,33 @@ function getStatistics(payload) {
     if (r.status === "PENDING") byDot[dot].pending++;
   });
 
-  var kltnScores = scores.filter(function (s) { return s.type === "KLTN" && s.score && !isNaN(Number(s.score)); });
+  // Điểm TB: trung bình theo sinh viên (SUBMISSIONS KLTN), không trung bình theo từng dòng SCORES (tránh đếm trùng vai trò).
+  var kltnSubs = submissions.filter(function (s) {
+    return s.type === "KLTN" && s.score !== undefined && s.score !== null && String(s.score).trim() !== "" && !isNaN(Number(s.score));
+  });
   var avgScore = 0;
-  if (kltnScores.length > 0) {
-    var sum = kltnScores.reduce(function (acc, s) { return acc + Number(s.score); }, 0);
-    avgScore = (sum / kltnScores.length).toFixed(2);
+  if (kltnSubs.length > 0) {
+    var sumSub = kltnSubs.reduce(function (acc, s) { return acc + Number(s.score); }, 0);
+    avgScore = (sumSub / kltnSubs.length).toFixed(2);
   }
+
+  var avgKltnByDot = {};
+  kltnSubs.forEach(function (s) {
+    var reg = regs.find(function (r) {
+      return String(r.student || "").toLowerCase() === String(s.student || "").toLowerCase() && r.type === "KLTN";
+    });
+    var dot = reg && reg.dot ? reg.dot : "Unknown";
+    if (!avgKltnByDot[dot]) avgKltnByDot[dot] = { sum: 0, n: 0 };
+    avgKltnByDot[dot].sum += Number(s.score);
+    avgKltnByDot[dot].n++;
+  });
+  var avgKltnByDotOut = {};
+  Object.keys(avgKltnByDot).forEach(function (d) {
+    var x = avgKltnByDot[d];
+    avgKltnByDotOut[d] = x.n > 0 ? (x.sum / x.n).toFixed(2) : "0";
+  });
+
+  var kltnScores = scores.filter(function (s) { return s.type === "KLTN" && s.score && !isNaN(Number(s.score)); });
 
   var revisionStats = {
     total: revisions.length,
@@ -968,9 +1449,10 @@ function getStatistics(payload) {
     data: {
       byDot: byDot,
       avgScore: avgScore,
+      avgKltnByDot: avgKltnByDotOut,
       revisionStats: revisionStats,
       periods: periods,
-      kltnScores: kltnScores
+      kltnScores: kltnScores.map(enrichScoreRow)
     }
   };
 }
@@ -990,6 +1472,7 @@ function approveRegistrationsBulk(payload) {
   var studentIdx = hc.map["student"];
   var typeIdx = hc.map["type"];
   var approvedAtIdx = hc.map["approvedat"] !== undefined ? hc.map["approvedat"] : -1;
+  var lecturerIdx = hc.map["lecturer"];
   if (idIdx === undefined || statusIdx === undefined || studentIdx === undefined || typeIdx === undefined) {
     return { ok: false, message: "Sheet REGISTRATIONS thieu cot bat buoc (id/status/student/type)" };
   }
@@ -1006,6 +1489,13 @@ function approveRegistrationsBulk(payload) {
         var regType = hc.values[i][typeIdx];
         var newStudentStatus = regType === "BCTT" ? "BCTT_APPROVED" : "KLTN_APPROVED";
         updateStudentStatus(studentEmail, newStudentStatus);
+        if (lecturerIdx !== undefined) {
+          var lec = hc.values[i][lecturerIdx];
+          if (lec) {
+            if (regType === "BCTT") patchStudentRowByEmail(studentEmail, { bcttLecturer: lec });
+            else if (regType === "KLTN") patchStudentRowByEmail(studentEmail, { kltnLecturer: lec });
+          }
+        }
       }
     }
   }
@@ -1024,6 +1514,7 @@ function updateRegistrationStatus(payload) {
   var studentIdx = hc.map["student"];
   var typeIdx = hc.map["type"];
   var approvedAtIdx = hc.map["approvedat"] !== undefined ? hc.map["approvedat"] : -1;
+  var lecturerIdx = hc.map["lecturer"];
   if (idIdx === undefined || statusIdx === undefined || studentIdx === undefined || typeIdx === undefined) {
     return { ok: false, message: "Sheet REGISTRATIONS thieu cot bat buoc" };
   }
@@ -1040,6 +1531,13 @@ function updateRegistrationStatus(payload) {
       if (payload.status === "APPROVED") {
         var newStudentStatus = regType === "BCTT" ? "BCTT_APPROVED" : "KLTN_APPROVED";
         updateStudentStatus(studentEmail, newStudentStatus);
+        if (lecturerIdx !== undefined) {
+          var lec2 = hc.values[i][lecturerIdx];
+          if (lec2) {
+            if (regType === "BCTT") patchStudentRowByEmail(studentEmail, { bcttLecturer: lec2 });
+            else if (regType === "KLTN") patchStudentRowByEmail(studentEmail, { kltnLecturer: lec2 });
+          }
+        }
       }
       writeAuditLog(payload.role || "TBM", payload.by || "TBM", "UPDATE_REGISTRATION_STATUS", payload.id, payload.status);
       return { ok: true, message: "Cap nhat trang thai thanh cong" };
@@ -1049,7 +1547,18 @@ function updateRegistrationStatus(payload) {
 }
 
 function assignCouncil(payload) {
-  var studentEmail = payload.student;
+  var studentEmail = String(payload.student || "").trim();
+  var regsAll = readObjects("REGISTRATIONS");
+  var kltnReg = regsAll.find(function (r) {
+    return String(r.student || "").toLowerCase() === String(studentEmail || "").toLowerCase() && String(r.type || "").toUpperCase() === "KLTN";
+  });
+  if (!kltnReg) {
+    return { ok: false, message: "Hoi dong chi ap dung cho KLTN. Sinh vien chua co dang ky KLTN." };
+  }
+  if (String(kltnReg.status || "").toUpperCase() !== "APPROVED") {
+    return { ok: false, message: "Can duyet dang ky KLTN truoc khi phan cong hoi dong." };
+  }
+
   var hc = getHeaderColumnMap("COUNCILS");
   if (!hc) return { ok: false, message: "Khong doc duoc sheet COUNCILS" };
   var stCol = hc.map["student"];
@@ -1080,21 +1589,27 @@ function assignCouncil(payload) {
 }
 
 function updateCouncilStatus(payload) {
-  var studentEmail = payload.student;
+  var studentEmail = String(payload.student || "").trim();
   var status = payload.status || "DEFENDED";
   var finalScore = payload.finalScore || "";
 
-  var sh = getSheet("COUNCILS");
-  var values = sh.getDataRange().getValues();
-  var headers = values[0];
-  var studentIdx = headers.indexOf("student");
-  var statusIdx = headers.indexOf("councilStatus");
-  var scoreIdx = headers.indexOf("finalScore");
+  var hc = getHeaderColumnMap("COUNCILS");
+  if (!hc) return { ok: false, message: "Khong doc duoc sheet COUNCILS" };
+  var stCol = hc.map["student"];
+  var statusCol = hc.map["councilstatus"];
+  var scoreCol = hc.map["finalscore"];
+  if (stCol === undefined) return { ok: false, message: "Thieu cot student trong COUNCILS" };
 
-  for (var i = 1; i < values.length; i++) {
-    if (values[i][studentIdx] === studentEmail) {
-      if (statusIdx >= 0) sh.getRange(i + 1, statusIdx + 1).setValue(status);
-      if (scoreIdx >= 0 && finalScore) sh.getRange(i + 1, scoreIdx + 1).setValue(finalScore);
+  var want = studentEmail.toLowerCase();
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    var rowEmail = String(hc.values[i][stCol] || "").trim().toLowerCase();
+    if (rowEmail === want) {
+      var rowNum = i + 1;
+      if (statusCol !== undefined) hc.sheet.getRange(rowNum, statusCol + 1).setValue(status);
+      if (scoreCol !== undefined && finalScore) hc.sheet.getRange(rowNum, scoreCol + 1).setValue(finalScore);
+      if (String(status || "").toUpperCase() === "DEFENDED") {
+        updateStudentStatus(studentEmail, "DEFENDED");
+      }
       writeAuditLog(payload.role || "THUKY", payload.by || "thuky", "UPDATE_COUNCIL_STATUS", studentEmail, status);
       return { ok: true, message: "Cap nhat trang thai hoi dong" };
     }
@@ -1103,20 +1618,24 @@ function updateCouncilStatus(payload) {
 }
 
 function saveFinalScore(payload) {
-  var studentEmail = payload.student;
+  var studentEmail = String(payload.student || "").trim();
   var finalScore = payload.finalScore;
 
-  var sh = getSheet("COUNCILS");
-  var values = sh.getDataRange().getValues();
-  var headers = values[0];
-  var studentIdx = headers.indexOf("student");
-  var scoreIdx = headers.indexOf("finalScore");
-  var statusIdx = headers.indexOf("councilStatus");
+  var hc = getHeaderColumnMap("COUNCILS");
+  if (!hc) return { ok: false, message: "Khong doc duoc sheet COUNCILS" };
+  var stCol = hc.map["student"];
+  var scoreCol = hc.map["finalscore"];
+  var statusCol = hc.map["councilstatus"];
+  if (stCol === undefined) return { ok: false, message: "Thieu cot student trong COUNCILS" };
 
-  for (var i = 1; i < values.length; i++) {
-    if (values[i][studentIdx] === studentEmail) {
-      if (scoreIdx >= 0) sh.getRange(i + 1, scoreIdx + 1).setValue(finalScore);
-      if (statusIdx >= 0) sh.getRange(i + 1, statusIdx + 1).setValue("DEFENDED");
+  var want = studentEmail.toLowerCase();
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    var rowEmail = String(hc.values[i][stCol] || "").trim().toLowerCase();
+    if (rowEmail === want) {
+      var rowNum = i + 1;
+      if (scoreCol !== undefined) hc.sheet.getRange(rowNum, scoreCol + 1).setValue(finalScore);
+      if (statusCol !== undefined) hc.sheet.getRange(rowNum, statusCol + 1).setValue("DEFENDED");
+      updateStudentStatus(studentEmail, "DEFENDED");
       writeAuditLog(payload.role || "THUKY", payload.by || "thuky", "SAVE_FINAL_SCORE", studentEmail, finalScore);
       return { ok: true, message: "Luu diem cuoi cung" };
     }
@@ -1125,7 +1644,7 @@ function saveFinalScore(payload) {
 }
 
 function saveCouncilMinutesUrl(payload) {
-  var studentEmail = payload.student;
+  var studentEmail = String(payload.student || "").trim();
   var minutesUrl = payload.minutesUrl || "";
   var hc = getHeaderColumnMap("COUNCILS");
   if (!hc) return { ok: false, message: "Khong doc duoc sheet COUNCILS" };
@@ -1135,8 +1654,10 @@ function saveCouncilMinutesUrl(payload) {
   if (urlCol === undefined) {
     return { ok: false, message: "Sheet COUNCILS chua co cot minutesUrl. Them cot minutesUrl (link bien ban hop HD) vao hang tieu de." };
   }
+  var want = studentEmail.toLowerCase();
   for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
-    if (String(hc.values[i][stCol] || "").toLowerCase() === String(studentEmail || "").toLowerCase()) {
+    var rowEmail = String(hc.values[i][stCol] || "").trim().toLowerCase();
+    if (rowEmail === want) {
       hc.sheet.getRange(i + 1, urlCol + 1).setValue(minutesUrl);
       writeAuditLog(payload.role || "THUKY", payload.by || "thuky", "SAVE_COUNCIL_MINUTES_URL", studentEmail, "URL updated");
       return { ok: true, message: "Cap nhat link bien ban thanh cong" };
@@ -1182,7 +1703,8 @@ function getStudentTimeline(payload) {
   var subs = readObjects("SUBMISSIONS").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
   var councils = readObjects("COUNCILS").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
   var revisions = readObjects("REVISIONS").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
-  var scores = readObjects("SCORES").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
+  var scoresRaw = readObjects("SCORES").filter(function (x) { return String(x.student || "").toLowerCase() === String(email || "").toLowerCase(); });
+  var scoresEnriched = dedupeEnrichedScoresByTypeRole(scoresRaw.map(enrichScoreRow));
   var periods = readObjects("PERIODS").filter(function (p) { return p.status === "ACTIVE"; });
   var students = readObjects("STUDENTS").filter(function (s) { return String(s.email || "").toLowerCase() === String(email || "").toLowerCase(); });
   var internshipForms = readObjects("INTERNSHIP_FORMS").filter(function (f) { return String(f.student || "").toLowerCase() === String(email || "").toLowerCase(); });
@@ -1203,13 +1725,57 @@ function getStudentTimeline(payload) {
     });
   });
 
+  function timelineScoreForSubmission(sub) {
+    if (!sub) return "";
+    if (sub.type === "PHIEU_TT") return "";
+    if (sub.type === "BCTT") {
+      var b = null;
+      for (var bi = 0; bi < scoresEnriched.length; bi++) {
+        var bx = scoresEnriched[bi];
+        if (bx.type === "BCTT" && normalizeScoreRoleKey(bx.role) === "GVHD") {
+          b = bx;
+          break;
+        }
+      }
+      if (b && b.score) return String(b.score);
+      return (sub.score != null && String(sub.score).trim() !== "") ? String(sub.score) : "";
+    }
+    if (sub.type === "KLTN") {
+      var c0 = councils[0];
+      if (c0 && c0.finalScore != null && String(c0.finalScore).trim() !== "" && !isNaN(Number(c0.finalScore)) && Number(c0.finalScore) > 0) {
+        return String(Number(Number(c0.finalScore).toFixed(2)));
+      }
+      if (sub.score != null && String(sub.score).trim() !== "") return String(sub.score);
+      var nums = [];
+      for (var ki = 0; ki < scoresEnriched.length; ki++) {
+        var kx = scoresEnriched[ki];
+        if (kx.type !== "KLTN") continue;
+        var rkk = normalizeScoreRoleKey(kx.role);
+        if (rkk !== "GVHD" && rkk !== "GVPB" && rkk !== "CHUTICH") continue;
+        var kn = Number(kx.score);
+        if (!isNaN(kn)) nums.push(kn);
+      }
+      if (nums.length > 0) {
+        var sm = 0;
+        for (var kj = 0; kj < nums.length; kj++) sm += nums[kj];
+        return (sm / nums.length).toFixed(2);
+      }
+      return "";
+    }
+    return (sub.score != null && String(sub.score).trim() !== "") ? String(sub.score) : "";
+  }
+
   subs.forEach(function (s) {
+    var disp = timelineScoreForSubmission(s);
+    var descLine = s.type === "PHIEU_TT"
+      ? (s.file ? "Da nop phieu xac nhan" : "Chua nop")
+      : ("Diem: " + (disp || "Chua cham"));
     timeline.push({
       key: "SUB_" + s.type,
       label: "Nop file " + s.type,
       status: s.file ? "DONE" : "PENDING",
-      desc: "Diem: " + (s.score || "Chua cham"),
-      score: s.score,
+      desc: descLine,
+      score: disp || s.score,
       file: s.file,
       turnitin: s.turnitin,
       gvhdApproval: s.gvhdApproval
@@ -1251,12 +1817,13 @@ function getStudentTimeline(payload) {
     });
   });
 
-  scores.forEach(function (s) {
+  scoresEnriched.forEach(function (s) {
+    var note = s.comment ? s.comment.substring(0, 80) : "";
     timeline.push({
       key: "SCORE_" + s.role + "_" + s.type,
       label: "Diem " + s.type + " (" + s.role + ")",
       status: s.score ? "DONE" : "PENDING",
-      desc: "Diem: " + (s.score || "Chua cham") + (s.comment ? " | Nhan xet: " + s.comment.substring(0, 50) : ""),
+      desc: "Diem: " + (s.score || "Chua cham") + (note ? " | Nhan xet: " + note : ""),
       score: s.score,
       comment: s.comment,
       role: s.role
@@ -1474,6 +2041,18 @@ function activateUser(payload) {
 function updateLecturerQuota(payload) {
   var email = payload.email;
   var quota = Number(payload.quota) || 0;
+  var actorEmail = String(payload.actorEmail || "").trim().toLowerCase();
+  if (actorEmail) {
+    var usersQ = readObjects("USERS");
+    var actorQ = usersQ.find(function (u) { return String(u.email || "").toLowerCase() === actorEmail; });
+    if (actorQ && String(actorQ.role || "").toUpperCase() === "TBM" && String(actorQ.major || "").trim()) {
+      var allLec = readObjects("LECTURERS");
+      var targetLec = allLec.find(function (x) { return String(x.email || "").toLowerCase() === String(email || "").toLowerCase(); });
+      if (!targetLec || !lecturerBelongsToTbmMajor(targetLec.majors, actorQ.major)) {
+        return { ok: false, message: "Chi duoc cap nhat quota giang vien cung chuyen nganh bo mon cua ban" };
+      }
+    }
+  }
 
   var hc = getHeaderColumnMap("LECTURERS");
   if (!hc) return { ok: false, message: "Khong doc duoc sheet LECTURERS" };
@@ -1602,6 +2181,10 @@ function submitRevision(payload) {
   var revisionNote = payload.revisionNote || "";
   var now = new Date().toISOString();
 
+  if (!studentMaySubmitKltnRevision(studentEmail)) {
+    return { ok: false, message: "Chi duoc nop bai chinh sua sau khi hoi dong da bao ve (DEFENDED)." };
+  }
+
   var revisions = readObjects("REVISIONS");
   var existing = revisions.find(function (r) { return String(r.student || "").toLowerCase() === String(studentEmail || "").toLowerCase(); });
 
@@ -1617,21 +2200,22 @@ function submitRevision(payload) {
 }
 
 function approveRevisionGVHD(payload) {
-  var studentEmail = payload.student;
+  var studentEmail = String(payload.student || "").trim();
   var approval = payload.approval || "YES";
   var now = new Date().toISOString();
 
-  var sh = getSheet("REVISIONS");
-  var values = sh.getDataRange().getValues();
-  var headers = values[0];
-  var studentIdx = headers.indexOf("student");
-  var approvalIdx = headers.indexOf("gvhdApproval");
-  var dateIdx = headers.indexOf("gvhdApprovalDate");
+  var hc = getHeaderColumnMap("REVISIONS");
+  if (!hc) return { ok: false, message: "Khong doc duoc sheet REVISIONS" };
+  var studentCol = hc.map["student"];
+  var approvalCol = hc.map["gvhdapproval"];
+  var dateCol = hc.map["gvhdapprovaldate"];
+  if (studentCol === undefined) return { ok: false, message: "Sheet REVISIONS thieu cot student" };
 
-  for (var i = 1; i < values.length; i++) {
-    if (String(values[i][studentIdx] || "").toLowerCase() === String(studentEmail || "").toLowerCase()) {
-      if (approvalIdx >= 0) sh.getRange(i + 1, approvalIdx + 1).setValue(approval);
-      if (dateIdx >= 0) sh.getRange(i + 1, dateIdx + 1).setValue(now);
+  var want = studentEmail.toLowerCase();
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    if (String(hc.values[i][studentCol] || "").trim().toLowerCase() === want) {
+      if (approvalCol !== undefined) hc.sheet.getRange(i + 1, approvalCol + 1).setValue(approval);
+      if (dateCol !== undefined) hc.sheet.getRange(i + 1, dateCol + 1).setValue(now);
       writeAuditLog("GV", payload.by || "gvhd", "APPROVE_REVISION_GVHD", studentEmail, approval);
       return { ok: true, message: "GVHD da " + (approval === "YES" ? "dong y" : "khong dong y") + " chinh sua" };
     }
@@ -1640,23 +2224,24 @@ function approveRevisionGVHD(payload) {
 }
 
 function approveRevisionChairman(payload) {
-  var studentEmail = payload.student;
+  var studentEmail = String(payload.student || "").trim();
   var approval = payload.approval || "YES";
   var now = new Date().toISOString();
 
-  var sh = getSheet("REVISIONS");
-  var values = sh.getDataRange().getValues();
-  var headers = values[0];
-  var studentIdx = headers.indexOf("student");
-  var approvalIdx = headers.indexOf("chairmanApproval");
-  var dateIdx = headers.indexOf("chairmanApprovalDate");
-  var finalIdx = headers.indexOf("finalStatus");
+  var hc = getHeaderColumnMap("REVISIONS");
+  if (!hc) return { ok: false, message: "Khong doc duoc sheet REVISIONS" };
+  var studentCol = hc.map["student"];
+  var approvalCol = hc.map["chairmanapproval"];
+  var dateCol = hc.map["chairmanapprovaldate"];
+  var finalCol = hc.map["finalstatus"];
+  if (studentCol === undefined) return { ok: false, message: "Sheet REVISIONS thieu cot student" };
 
-  for (var i = 1; i < values.length; i++) {
-    if (String(values[i][studentIdx] || "").toLowerCase() === String(studentEmail || "").toLowerCase()) {
-      if (approvalIdx >= 0) sh.getRange(i + 1, approvalIdx + 1).setValue(approval);
-      if (dateIdx >= 0) sh.getRange(i + 1, dateIdx + 1).setValue(now);
-      if (finalIdx >= 0) sh.getRange(i + 1, finalIdx + 1).setValue(approval);
+  var want = studentEmail.toLowerCase();
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    if (String(hc.values[i][studentCol] || "").trim().toLowerCase() === want) {
+      if (approvalCol !== undefined) hc.sheet.getRange(i + 1, approvalCol + 1).setValue(approval);
+      if (dateCol !== undefined) hc.sheet.getRange(i + 1, dateCol + 1).setValue(now);
+      if (finalCol !== undefined) hc.sheet.getRange(i + 1, finalCol + 1).setValue(approval);
       writeAuditLog("CHUTICH", payload.by || "chutich", "APPROVE_REVISION_CHAIRMAN", studentEmail, approval);
       return { ok: true, message: "Chu tich da " + (approval === "YES" ? "dong y" : "khong dong y") + " chinh sua" };
     }
@@ -1678,7 +2263,9 @@ function getRevisionApprovals(payload) {
     var usr = users.find(function (u) { return String(u.email || "").toLowerCase() === String(r.student || "").toLowerCase(); }) || {};
     var council = councils.find(function (c) { return String(c.student || "").toLowerCase() === String(r.student || "").toLowerCase(); }) || {};
 
-    var canApproveGVHD = role === "GV" && String(council.gvhd || "").toLowerCase() === String(email || "").toLowerCase();
+    var roleU = String(role || "").trim().toUpperCase();
+    var isGvhdActor = roleU === "GV" || roleU === "GVHD";
+    var canApproveGVHD = isGvhdActor && String(council.gvhd || "").toLowerCase() === String(email || "").toLowerCase();
     var canApproveChairman = role === "CHUTICH" && String(council.chairman || "").toLowerCase() === String(email || "").toLowerCase();
 
     if (canApproveGVHD || canApproveChairman) {
@@ -1712,7 +2299,10 @@ function getCouncilMinutes(payload) {
   var st = users.find(function (u) { return String(u.email || "").toLowerCase() === String(studentEmail || "").toLowerCase(); }) || {};
 
   var scoreBreakdown = {};
-  scores.forEach(function (s) { scoreBreakdown[s.role] = s; });
+  scores.forEach(function (s) {
+    var e = enrichScoreRow(s);
+    scoreBreakdown[normalizeScoreRoleKey(s.role)] = e;
+  });
 
   return {
     ok: true,
@@ -1754,6 +2344,31 @@ function updateStudentStatus(email, status) {
       hc.sheet.getRange(i + 1, statusCol + 1).setValue(status);
       return;
     }
+  }
+}
+
+/**
+ * Ghi một hoặc nhiều cột trên sheet STUDENTS theo email (khớp header đa dòng như template).
+ * patch: { bcttLecturer, kltnLecturer, internshipForm, status, ... } — chỉ ghi key có giá trị (không null/undefined).
+ */
+function patchStudentRowByEmail(email, patch) {
+  if (!email || !patch || typeof patch !== "object") return;
+  var hc = getHeaderColumnMap("STUDENTS");
+  if (!hc) return;
+  var emailCol = hc.map["email"];
+  if (emailCol === undefined) return;
+  var emailNorm = String(email || "").toLowerCase();
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    if (String(hc.values[i][emailCol] || "").toLowerCase() !== emailNorm) continue;
+    var rowNum = i + 1;
+    for (var k in patch) {
+      if (!Object.prototype.hasOwnProperty.call(patch, k)) continue;
+      var val = patch[k];
+      if (val === undefined || val === null) continue;
+      var col = hc.map[String(k).trim().toLowerCase()];
+      if (col !== undefined) hc.sheet.getRange(rowNum, col + 1).setValue(val);
+    }
+    return;
   }
 }
 
@@ -1820,14 +2435,14 @@ function updateScoreRow(id, student, type, role, score, comment, savedAt, rubric
     for (var r = 0; r < Math.min(values.length, 15); r++) {
       var row = values[r] || [];
       var norm = row.map(function (c) { return String(c || "").trim().toLowerCase(); });
-      var score = 0;
+      var hdrHits = 0;
       for (var e = 0; e < expectedNorm.length; e++) {
         var key = expectedNorm[e];
         if (!key) continue;
-        // Nhận định "trùng" nếu cell header có chứa key.
-        if (norm.join("|").indexOf(key) !== -1) score++;
+        // Nhận định "trùng" nếu cell header có chứa key.if (norm.join("|").indexOf(key) !== -1) hdrHits++;
+        if (norm.join("|").indexOf(key) !== -1) hdrHits++;
       }
-      if (score >= 2) {
+      if (hdrHits >= 2) {
         headerRowIdx = r;
         break;
       }
@@ -1951,21 +2566,28 @@ function appendScoreRowMapped(id, student, type, role, score, comment, savedAt, 
 }
 
 function updateRevision(studentEmail, kltnFile, revisionNote, submittedAt) {
-  var sh = getSheet("REVISIONS");
-  var values = sh.getDataRange().getValues();
-  var headers = values[0];
-  var studentIdx = headers.indexOf("student");
+  var hc = getHeaderColumnMap("REVISIONS");
+  if (!hc) return;
+  var studentCol = hc.map["student"];
+  var kltnCol = hc.map["kltnfile"];
+  var noteCol = hc.map["revisionnote"];
+  var subAtCol = hc.map["submittedat"];
+  var gvhdApCol = hc.map["gvhdapproval"];
+  var chairApCol = hc.map["chairmanapproval"];
+  var finalCol = hc.map["finalstatus"];
+  if (studentCol === undefined) return;
 
-  for (var i = 1; i < values.length; i++) {
-    if (String(values[i][studentIdx] || "").toLowerCase() === String(studentEmail || "").toLowerCase()) {
-      if (kltnFile) sh.getRange(i + 1, 3).setValue(kltnFile);
-      if (revisionNote) sh.getRange(i + 1, 4).setValue(revisionNote);
-      sh.getRange(i + 1, 5).setValue(submittedAt);
-      sh.getRange(i + 1, 6).setValue("PENDING");
-      sh.getRange(i + 1, 8).setValue("PENDING");
-      sh.getRange(i + 1, 10).setValue("");
-      return;
-    }
+  var want = String(studentEmail || "").trim().toLowerCase();
+  for (var i = hc.headerRowIdx + 1; i < hc.values.length; i++) {
+    if (String(hc.values[i][studentCol] || "").trim().toLowerCase() !== want) continue;
+    var rowNum = i + 1;
+    if (kltnFile && kltnCol !== undefined) hc.sheet.getRange(rowNum, kltnCol + 1).setValue(kltnFile);
+    if (revisionNote && noteCol !== undefined) hc.sheet.getRange(rowNum, noteCol + 1).setValue(revisionNote);
+    if (subAtCol !== undefined) hc.sheet.getRange(rowNum, subAtCol + 1).setValue(submittedAt);
+    if (gvhdApCol !== undefined) hc.sheet.getRange(rowNum, gvhdApCol + 1).setValue("PENDING");
+    if (chairApCol !== undefined) hc.sheet.getRange(rowNum, chairApCol + 1).setValue("PENDING");
+    if (finalCol !== undefined) hc.sheet.getRange(rowNum, finalCol + 1).setValue("");
+    return;
   }
 }
 
